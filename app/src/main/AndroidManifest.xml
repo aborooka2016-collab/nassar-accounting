@@ -7,6 +7,10 @@
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
 
         <activity
+            android:name=".DebtsActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".InvoicesActivity"
             android:exported="false" />
 
