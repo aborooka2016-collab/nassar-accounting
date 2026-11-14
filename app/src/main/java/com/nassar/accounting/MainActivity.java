@@ -1,16 +1,14 @@
-
 package com.nassar.accounting;
 
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
-import android.os.Bundle;
-import android.graphics.Color;
+import android.content.ContentValues;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
-import android.database.sqlite.SQLiteOpenHelper;
-import android.content.Context;
-import android.content.ContentValues;
+import android.database.sqlite.SQLiteException;
+import android.graphics.Color;
+import android.os.Bundle;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.View;
@@ -21,52 +19,104 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.io.File;
+import java.util.Locale;
+
 public class MainActivity extends Activity {
 
     private final int purple = Color.rgb(92, 45, 145);
 
+    private AccountingDb db;
     private LinearLayout page;
-    private StockDb db;
-    private AccountingDb accountingDb;
     private boolean stockOpen = false;
-
-    static class StockDb extends SQLiteOpenHelper {
-
-        StockDb(Context context) {
-            super(context, "nassar_stock.db", null, 1);
-        }
-
-        @Override
-        public void onCreate(SQLiteDatabase database) {
-            database.execSQL(
-                "CREATE TABLE products (" +
-                "id INTEGER PRIMARY KEY AUTOINCREMENT, " +
-                "name TEXT NOT NULL, " +
-                "qty REAL NOT NULL DEFAULT 0, " +
-                "buy REAL NOT NULL DEFAULT 0, " +
-                "sell REAL NOT NULL DEFAULT 0)"
-            );
-        }
-
-        @Override
-        public void onUpgrade(
-            SQLiteDatabase database,
-            int oldVersion,
-            int newVersion
-        ) {
-        }
-    }
 
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
 
-        db = new StockDb(this);
-        accountingDb = new AccountingDb(this);
+        db = new AccountingDb(this);
 
-        accountingDb.getWritableDatabase();
+        try {
+            migrateOldStock();
+        } catch (Exception e) {
+            Toast.makeText(
+                this,
+                "تعذر نقل المخزون القديم: " + e.getMessage(),
+                Toast.LENGTH_LONG
+            ).show();
+        }
 
         showHome();
+    }
+
+    private void migrateOldStock() {
+
+        SQLiteDatabase target = db.getWritableDatabase();
+
+        target.execSQL(
+            "CREATE TABLE IF NOT EXISTS migration_status (" +
+            "name TEXT PRIMARY KEY)"
+        );
+
+        try (Cursor check = target.rawQuery(
+            "SELECT name FROM migration_status " +
+            "WHERE name='old_stock_v1'",
+            null
+        )) {
+            if (check.moveToFirst()) return;
+        }
+
+        File oldFile = getDatabasePath("nassar_stock.db");
+
+        if (!oldFile.exists()) {
+            target.execSQL(
+                "INSERT OR IGNORE INTO migration_status(name) " +
+                "VALUES('old_stock_v1')"
+            );
+            return;
+        }
+
+        SQLiteDatabase old = SQLiteDatabase.openDatabase(
+            oldFile.getAbsolutePath(),
+            null,
+            SQLiteDatabase.OPEN_READONLY
+        );
+
+        try {
+            target.beginTransaction();
+
+            try (Cursor c = old.rawQuery(
+                "SELECT id,name,qty,buy,sell FROM products",
+                null
+            )) {
+                while (c.moveToNext()) {
+
+                    ContentValues values = new ContentValues();
+
+                    values.put("name", c.getString(1));
+                    values.put("quantity", c.getDouble(2));
+                    values.put("buy_price", c.getDouble(3));
+                    values.put("sell_price", c.getDouble(4));
+
+                    target.insertOrThrow(
+                        "products",
+                        null,
+                        values
+                    );
+                }
+            }
+
+            target.execSQL(
+                "INSERT INTO migration_status(name) " +
+                "VALUES('old_stock_v1')"
+            );
+
+            target.setTransactionSuccessful();
+
+        } finally {
+            target.endTransaction();
+            old.close();
+        }
     }
 
     private void makePage(String heading) {
@@ -92,7 +142,7 @@ public class MainActivity extends Activity {
 
         Button b = new Button(this);
         b.setText(label);
-        b.setTextSize(17);
+        b.setTextSize(16);
         b.setAllCaps(false);
 
         LinearLayout.LayoutParams p =
@@ -102,6 +152,10 @@ public class MainActivity extends Activity {
         parent.addView(b, p);
 
         return b;
+    }
+
+    private String money(double value) {
+        return String.format(Locale.US, "%.2f", value);
     }
 
     private void showHome() {
@@ -143,17 +197,20 @@ public class MainActivity extends Activity {
             b.setOnClickListener(v -> {
 
                 if (
-    section.equals("المبيعات") ||
-    section.equals("المشتريات")
-) {
-    startActivity(
-        new Intent(
-            MainActivity.this,
-            InvoicesActivity.class
-        )
-    );
+                    section.equals("المبيعات") ||
+                    section.equals("المشتريات")
+                ) {
 
-} else if (section.equals("الأصناف والمخازن")) {
+                    startActivity(
+                        new Intent(
+                            this,
+                            InvoicesActivity.class
+                        )
+                    );
+
+                } else if (
+                    section.equals("الأصناف والمخازن")
+                ) {
 
                     showStock();
 
@@ -163,7 +220,7 @@ public class MainActivity extends Activity {
 
                     startActivity(
                         new Intent(
-                            MainActivity.this,
+                            this,
                             CustomersActivity.class
                         )
                     );
@@ -172,9 +229,7 @@ public class MainActivity extends Activity {
 
                     new AlertDialog.Builder(this)
                         .setTitle(section)
-                        .setMessage(
-                            "القسم ده لسه تحت التطوير."
-                        )
+                        .setMessage("القسم ده لسه تحت التطوير.")
                         .setPositiveButton("موافق", null)
                         .show();
                 }
@@ -203,99 +258,98 @@ public class MainActivity extends Activity {
         LinearLayout list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
 
-        SQLiteDatabase database = db.getReadableDatabase();
-
-        Cursor c = database.rawQuery(
-            "SELECT id,name,qty,buy,sell " +
+        try (Cursor c = db.getReadableDatabase().rawQuery(
+            "SELECT id,name,quantity,buy_price,sell_price " +
             "FROM products ORDER BY id DESC",
             null
-        );
+        )) {
 
-        if (c.getCount() == 0) {
+            if (c.getCount() == 0) {
 
-            TextView empty = new TextView(this);
-            empty.setText(
-                "مفيش أصناف مسجلة. اضغط إضافة صنف."
-            );
-            empty.setTextSize(17);
-            empty.setPadding(10, 25, 10, 25);
+                TextView empty = new TextView(this);
+                empty.setText("مفيش أصناف مسجلة.");
+                empty.setTextSize(17);
+                empty.setPadding(10, 25, 10, 25);
 
-            list.addView(empty);
-        }
+                list.addView(empty);
+            }
 
-        while (c.moveToNext()) {
+            while (c.moveToNext()) {
 
-            int id = c.getInt(0);
-            String name = c.getString(1);
-            String qty = String.valueOf(c.getDouble(2));
-            String buy = String.valueOf(c.getDouble(3));
-            String sell = String.valueOf(c.getDouble(4));
+                long id = c.getLong(0);
+                String name = c.getString(1);
+                String qty = money(c.getDouble(2));
+                String buy = money(c.getDouble(3));
+                String sell = money(c.getDouble(4));
 
-            Button item = button(
-                name +
-                "\nالكمية: " + qty +
-                " | شراء: " + buy +
-                " | بيع: " + sell,
-                list
-            );
+                Button item = button(
+                    name +
+                    "\nالكمية: " + qty +
+                    " | شراء: " + buy +
+                    " | بيع: " + sell,
+                    list
+                );
 
-            item.setOnClickListener(v ->
+                item.setOnClickListener(v ->
+                    new AlertDialog.Builder(this)
+                        .setTitle(name)
+                        .setItems(
+                            new String[]{
+                                "تعديل الصنف",
+                                "حذف الصنف"
+                            },
+                            (dialog, which) -> {
 
-                new AlertDialog.Builder(this)
-                    .setTitle(name)
-                    .setItems(
-                        new String[]{
-                            "تعديل الصنف",
-                            "حذف الصنف"
-                        },
-                        (dialog, which) -> {
-
-                            if (which == 0) {
-
-                                editProduct(
-                                    id, name, qty, buy, sell
-                                );
-
-                            } else {
-
-                                confirmDelete(id, name);
+                                if (which == 0) {
+                                    editProduct(
+                                        id, name, qty, buy, sell
+                                    );
+                                } else {
+                                    confirmDelete(id, name);
+                                }
                             }
-                        }
-                    )
-                    .show()
-            );
+                        )
+                        .show()
+                );
+            }
         }
-
-        c.close();
 
         scroll.addView(list);
+
         page.addView(
             scroll,
-            new LinearLayout.LayoutParams(
-                -1, 0, 1
-            )
+            new LinearLayout.LayoutParams(-1, 0, 1)
         );
     }
 
-    private void confirmDelete(int id, String name) {
+    private void confirmDelete(long id, String name) {
 
         new AlertDialog.Builder(this)
             .setTitle("حذف الصنف")
-            .setMessage(
-                "هل تريد حذف الصنف: " + name + "؟"
-            )
+            .setMessage("هل تريد حذف الصنف: " + name + "؟")
             .setNegativeButton("إلغاء", null)
             .setPositiveButton("حذف", (d, w) -> {
 
-                db.getWritableDatabase().delete(
-                    "products",
-                    "id=?",
-                    new String[]{
-                        String.valueOf(id)
-                    }
-                );
+                try {
 
-                showStock();
+                    int count = db.getWritableDatabase().delete(
+                        "products",
+                        "id=?",
+                        new String[]{String.valueOf(id)}
+                    );
+
+                    if (count > 0) {
+                        showStock();
+                    }
+
+                } catch (SQLiteException e) {
+
+                    Toast.makeText(
+                        this,
+                        "لا يمكن حذف صنف مرتبط بفواتير",
+                        Toast.LENGTH_LONG
+                    ).show();
+                }
             })
             .show();
     }
@@ -316,8 +370,7 @@ public class MainActivity extends Activity {
         if (number) {
             input.setInputType(
                 InputType.TYPE_CLASS_NUMBER |
-                InputType.TYPE_NUMBER_FLAG_DECIMAL |
-                InputType.TYPE_NUMBER_FLAG_SIGNED
+                InputType.TYPE_NUMBER_FLAG_DECIMAL
             );
         }
 
@@ -330,7 +383,7 @@ public class MainActivity extends Activity {
     }
 
     private void editProduct(
-        int id,
+        long id,
         String oldName,
         String oldQty,
         String oldBuy,
@@ -368,13 +421,11 @@ public class MainActivity extends Activity {
                 .create();
 
         dialog.setOnShowListener(d ->
-
             dialog.getButton(
                 AlertDialog.BUTTON_POSITIVE
             ).setOnClickListener(v -> {
 
-                String n =
-                    name.getText().toString().trim();
+                String n = name.getText().toString().trim();
 
                 if (n.isEmpty()) {
                     name.setError("اسم الصنف مطلوب");
@@ -401,13 +452,11 @@ public class MainActivity extends Activity {
                         !Double.isFinite(s) ||
                         q < 0 || b < 0 || s < 0
                     ) {
-
                         Toast.makeText(
                             this,
                             "أدخل أرقام صحيحة وغير سالبة",
                             Toast.LENGTH_SHORT
                         ).show();
-
                         return;
                     }
 
@@ -415,32 +464,39 @@ public class MainActivity extends Activity {
                         new ContentValues();
 
                     values.put("name", n);
-                    values.put("qty", q);
-                    values.put("buy", b);
-                    values.put("sell", s);
+                    values.put("quantity", q);
+                    values.put("buy_price", b);
+                    values.put("sell_price", s);
 
-                    if (id < 0) {
+                    try {
 
-                        db.getWritableDatabase()
-                            .insertOrThrow(
+                        if (id < 0) {
+
+                            db.getWritableDatabase().insertOrThrow(
                                 "products", null, values
                             );
 
-                    } else {
+                        } else {
 
-                        db.getWritableDatabase()
-                            .update(
+                            db.getWritableDatabase().update(
                                 "products",
                                 values,
                                 "id=?",
-                                new String[]{
-                                    String.valueOf(id)
-                                }
+                                new String[]{String.valueOf(id)}
                             );
-                    }
+                        }
 
-                    dialog.dismiss();
-                    showStock();
+                        dialog.dismiss();
+                        showStock();
+
+                    } catch (Exception e) {
+
+                        Toast.makeText(
+                            this,
+                            "تعذر حفظ الصنف",
+                            Toast.LENGTH_LONG
+                        ).show();
+                    }
 
                 } catch (NumberFormatException e) {
 
@@ -448,14 +504,6 @@ public class MainActivity extends Activity {
                         this,
                         "راجع الكمية والأسعار",
                         Toast.LENGTH_SHORT
-                    ).show();
-
-                } catch (Exception e) {
-
-                    Toast.makeText(
-                        this,
-                        "تعذر حفظ الصنف",
-                        Toast.LENGTH_LONG
                     ).show();
                 }
             })
@@ -477,7 +525,6 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         if (db != null) db.close();
-        if (accountingDb != null) accountingDb.close();
         super.onDestroy();
     }
 }
