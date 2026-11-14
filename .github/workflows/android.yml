@@ -1,5 +1,5 @@
 
-name: Build NASSAR APK
+name: Build Signed NASSAR APK
 
 on:
   workflow_dispatch:
@@ -50,12 +50,61 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Build Debug APK
-        run: gradle assembleDebug --no-daemon
+      - name: Restore signing key
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.NASSAR_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$KEYSTORE_BASE64" || {
+            echo "Missing keystore secret"
+            exit 1
+          }
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/nassar-release.jks"
+          chmod 600 "$RUNNER_TEMP/nassar-release.jks"
 
-      - name: Upload APK
+      - name: Build Release APK
+        run: gradle assembleRelease --no-daemon
+
+      - name: Sign Release APK
+        shell: bash
+        env:
+          STORE_PASSWORD: ${{ secrets.NASSAR_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.NASSAR_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.NASSAR_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+
+          test -n "$STORE_PASSWORD"
+          test -n "$KEY_PASSWORD"
+          test -n "$KEY_ALIAS"
+
+          BUILD_TOOLS="$ANDROID_HOME/build-tools/35.0.0"
+          UNSIGNED="app/build/outputs/apk/release/app-release-unsigned.apk"
+
+          mkdir -p signed-apk
+
+          "$BUILD_TOOLS/zipalign" -f -p 4 \
+            "$UNSIGNED" \
+            signed-apk/nassar-aligned.apk
+
+          "$BUILD_TOOLS/apksigner" sign \
+            --ks "$RUNNER_TEMP/nassar-release.jks" \
+            --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass env:STORE_PASSWORD \
+            --key-pass env:KEY_PASSWORD \
+            --out signed-apk/NASSAR-Accounting.apk \
+            signed-apk/nassar-aligned.apk
+
+          "$BUILD_TOOLS/apksigner" verify \
+            --verbose \
+            signed-apk/NASSAR-Accounting.apk
+
+          rm -f signed-apk/nassar-aligned.apk
+
+      - name: Upload Signed APK
         uses: actions/upload-artifact@v4
         with:
-          name: NASSAR-Accounting-APK
-          path: app/build/outputs/apk/debug/*.apk
+          name: NASSAR-Signed-APK
+          path: signed-apk/NASSAR-Accounting.apk
           if-no-files-found: error
+          retention-days: 7
