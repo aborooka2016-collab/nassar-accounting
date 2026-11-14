@@ -142,7 +142,18 @@ public class MainActivity extends Activity {
 
             b.setOnClickListener(v -> {
 
-                if (section.equals("الأصناف والمخازن")) {
+                if (
+    section.equals("المبيعات") ||
+    section.equals("المشتريات")
+) {
+    startActivity(
+        new Intent(
+            MainActivity.this,
+            InvoicesActivity.class
+        )
+    );
+
+} else if (section.equals("الأصناف والمخازن")) {
 
                     showStock();
 
