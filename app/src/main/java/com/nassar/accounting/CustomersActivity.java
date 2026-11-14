@@ -1,60 +1,141 @@
-
 package com.nassar.accounting;
 
 import android.app.Activity;
 import android.app.AlertDialog;
-import android.os.Bundle;
 import android.content.ContentValues;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
-import android.database.sqlite.SQLiteOpenHelper;
-import android.content.Context;
+import android.database.sqlite.SQLiteException;
 import android.graphics.Color;
-import android.view.View;
-import android.view.Gravity;
-import android.widget.*;
+import android.os.Bundle;
+import android.text.Editable;
 import android.text.InputType;
 import android.text.TextWatcher;
-import android.text.Editable;
+import android.view.Gravity;
+import android.view.View;
+import android.widget.ArrayAdapter;
+import android.widget.Button;
+import android.widget.EditText;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.Spinner;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import java.io.File;
+import java.util.Locale;
 
 public class CustomersActivity extends Activity {
 
+    private AccountingDb helper;
     private LinearLayout list;
     private EditText search;
-    private Database db;
+
     private final int purple = Color.rgb(92, 45, 145);
-
-    static class Database extends SQLiteOpenHelper {
-
-        Database(Context context) {
-            super(context, "nassar_contacts.db", null, 1);
-        }
-
-        @Override
-        public void onCreate(SQLiteDatabase d) {
-            d.execSQL(
-                "CREATE TABLE contacts (" +
-                "id INTEGER PRIMARY KEY AUTOINCREMENT," +
-                "type TEXT NOT NULL," +
-                "name TEXT NOT NULL," +
-                "phone TEXT," +
-                "address TEXT," +
-                "balance REAL DEFAULT 0)"
-            );
-        }
-
-        @Override
-        public void onUpgrade(
-            SQLiteDatabase d, int oldVersion, int newVersion
-        ) {
-        }
-    }
 
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
-        db = new Database(this);
+
+        helper = new AccountingDb(this);
+
+        try {
+            migrateOldContacts();
+        } catch (Exception e) {
+            new AlertDialog.Builder(this)
+                .setTitle("تنبيه نقل البيانات")
+                .setMessage(
+                    "تعذر نقل بعض البيانات القديمة. " +
+                    "لم يتم حذف قاعدة البيانات الأصلية.\n\n" +
+                    e.getMessage()
+                )
+                .setPositiveButton("موافق", null)
+                .show();
+        }
+
         buildScreen();
+    }
+
+    private void migrateOldContacts() {
+
+        SQLiteDatabase target = helper.getWritableDatabase();
+
+        target.execSQL(
+            "CREATE TABLE IF NOT EXISTS migration_status (" +
+            "name TEXT PRIMARY KEY)"
+        );
+
+        try (Cursor check = target.rawQuery(
+            "SELECT name FROM migration_status " +
+            "WHERE name='old_contacts_v1'",
+            null
+        )) {
+            if (check.moveToFirst()) {
+                return;
+            }
+        }
+
+        File oldFile = getDatabasePath("nassar_contacts.db");
+
+        if (!oldFile.exists()) {
+            return;
+        }
+
+        SQLiteDatabase old = SQLiteDatabase.openDatabase(
+            oldFile.getAbsolutePath(),
+            null,
+            SQLiteDatabase.OPEN_READONLY
+        );
+
+        try {
+            target.beginTransaction();
+
+            try (Cursor c = old.rawQuery(
+                "SELECT id,type,name,phone,address,balance " +
+                "FROM contacts ORDER BY id",
+                null
+            )) {
+                while (c.moveToNext()) {
+
+                    String oldType = c.getString(1);
+
+                    String type = "مورد".equals(oldType)
+                        ? "supplier"
+                        : "customer";
+
+                    ContentValues values = new ContentValues();
+
+                    values.put("type", type);
+                    values.put("name", c.getString(2));
+                    values.put("phone", c.getString(3));
+                    values.put("address", c.getString(4));
+                    values.put(
+                        "opening_balance",
+                        c.getDouble(5)
+                    );
+
+                    target.insertOrThrow(
+                        "parties",
+                        null,
+                        values
+                    );
+                }
+            }
+
+            target.execSQL(
+                "INSERT INTO migration_status(name) " +
+                "VALUES('old_contacts_v1')"
+            );
+
+            target.setTransactionSuccessful();
+
+        } finally {
+            if (target.inTransaction()) {
+                target.endTransaction();
+            }
+
+            old.close();
+        }
     }
 
     private void buildScreen() {
@@ -63,31 +144,56 @@ public class CustomersActivity extends Activity {
         root.setOrientation(LinearLayout.VERTICAL);
         root.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);
         root.setPadding(16, 20, 16, 16);
-        root.setBackgroundColor(Color.rgb(248, 247, 252));
+        root.setBackgroundColor(
+            Color.rgb(248, 247, 252)
+        );
 
         TextView title = new TextView(this);
         title.setText("العملاء والموردون");
         title.setTextSize(26);
         title.setTextColor(purple);
         title.setGravity(Gravity.CENTER);
+
         root.addView(title);
+
+        TextView description = new TextView(this);
+        description.setText(
+            "الأرصدة والفواتير في قاعدة بيانات واحدة"
+        );
+        description.setTextSize(14);
+        description.setGravity(Gravity.CENTER);
+        description.setPadding(0, 4, 0, 12);
+
+        root.addView(description);
 
         Button add = new Button(this);
         add.setText("+ إضافة عميل أو مورد");
+        add.setAllCaps(false);
+
         root.addView(add);
 
-        add.setOnClickListener(v -> editContact(
-            -1, "عميل", "", "", "", "0"
-        ));
+        add.setOnClickListener(v ->
+            editContact(
+                -1,
+                "customer",
+                "",
+                "",
+                "",
+                "0"
+            )
+        );
 
         search = new EditText(this);
         search.setHint("بحث بالاسم أو الهاتف");
         search.setSingleLine(true);
+
         root.addView(search);
 
         ScrollView scroll = new ScrollView(this);
+
         list = new LinearLayout(this);
         list.setOrientation(LinearLayout.VERTICAL);
+
         scroll.addView(list);
 
         root.addView(
@@ -97,90 +203,213 @@ public class CustomersActivity extends Activity {
 
         Button back = new Button(this);
         back.setText("رجوع للرئيسية");
+        back.setAllCaps(false);
         back.setOnClickListener(v -> finish());
+
         root.addView(back);
 
         setContentView(root);
 
-        search.addTextChangedListener(new TextWatcher() {
-            public void beforeTextChanged(
-                CharSequence s, int start, int count, int after
-            ) {}
+        search.addTextChangedListener(
+            new TextWatcher() {
 
-            public void onTextChanged(
-                CharSequence s, int start, int before, int count
-            ) {
-                loadContacts(s.toString());
+                @Override
+                public void beforeTextChanged(
+                    CharSequence s,
+                    int start,
+                    int count,
+                    int after
+                ) {}
+
+                @Override
+                public void onTextChanged(
+                    CharSequence s,
+                    int start,
+                    int before,
+                    int count
+                ) {
+                    loadContacts(s.toString());
+                }
+
+                @Override
+                public void afterTextChanged(
+                    Editable e
+                ) {}
             }
-
-            public void afterTextChanged(Editable e) {}
-        });
+        );
 
         loadContacts("");
+    }
+
+    private String money(double value) {
+        return String.format(
+            Locale.US,
+            "%.2f",
+            value
+        );
+    }
+
+    private String labelForType(String type) {
+        return "supplier".equals(type)
+            ? "مورد"
+            : "عميل";
+    }
+
+    private double invoiceBalance(
+        SQLiteDatabase database,
+        long partyId
+    ) {
+
+        try (Cursor c = database.rawQuery(
+            "SELECT COALESCE(" +
+            "SUM(total - discount - paid), 0) " +
+            "FROM invoices WHERE party_id=?",
+            new String[]{
+                String.valueOf(partyId)
+            }
+        )) {
+
+            if (c.moveToFirst()) {
+                return c.getDouble(0);
+            }
+        }
+
+        return 0;
     }
 
     private void loadContacts(String query) {
 
         list.removeAllViews();
 
-        String pattern = "%" + query + "%";
+        String pattern = "%" + query.trim() + "%";
 
-        Cursor c = db.getReadableDatabase().rawQuery(
-            "SELECT id,type,name,phone,address,balance " +
-            "FROM contacts " +
+        SQLiteDatabase database =
+            helper.getReadableDatabase();
+
+        try (Cursor c = database.rawQuery(
+            "SELECT id,type,name,phone,address," +
+            "opening_balance " +
+            "FROM parties " +
             "WHERE name LIKE ? OR phone LIKE ? " +
             "ORDER BY id DESC",
             new String[]{pattern, pattern}
-        );
+        )) {
 
-        if (c.getCount() == 0) {
-            TextView empty = new TextView(this);
-            empty.setText("لا توجد بيانات");
-            empty.setTextSize(17);
-            empty.setPadding(10, 30, 10, 30);
-            list.addView(empty);
-        }
+            if (c.getCount() == 0) {
 
-        while (c.moveToNext()) {
+                TextView empty = new TextView(this);
+                empty.setText("لا توجد بيانات");
+                empty.setTextSize(17);
+                empty.setPadding(10, 30, 10, 30);
 
-            int id = c.getInt(0);
-            String type = c.getString(1);
-            String name = c.getString(2);
-            String phone = c.getString(3);
-            String address = c.getString(4);
-            String balance = String.valueOf(c.getDouble(5));
+                list.addView(empty);
+            }
 
-            Button item = new Button(this);
-            item.setAllCaps(false);
-            item.setText(
-                type + " | " + name +
-                "\nالهاتف: " + phone +
-                "\nالرصيد الافتتاحي: " + balance
-            );
+            while (c.moveToNext()) {
 
-            list.addView(item);
+                long id = c.getLong(0);
+                String type = c.getString(1);
+                String name = c.getString(2);
 
-            item.setOnClickListener(v ->
-                new AlertDialog.Builder(this)
-                    .setTitle(name)
-                    .setItems(
-                        new String[]{"تعديل", "حذف"},
-                        (dialog, choice) -> {
+                String phone = c.isNull(3)
+                    ? ""
+                    : c.getString(3);
 
-                            if (choice == 0) {
-                                editContact(
-                                    id, type, name,
-                                    phone, address, balance
-                                );
-                            } else {
-                                confirmDelete(id, name);
+                String address = c.isNull(4)
+                    ? ""
+                    : c.getString(4);
+
+                double opening = c.getDouble(5);
+
+                double invoicesDue =
+                    invoiceBalance(database, id);
+
+                double balance = opening + invoicesDue;
+
+                Button item = new Button(this);
+                item.setAllCaps(false);
+
+                item.setText(
+                    labelForType(type) + " | " + name +
+                    "\nالهاتف: " + phone +
+                    "\nالرصيد الافتتاحي: " +
+                    money(opening) + " جنيه" +
+                    "\nمتبقي الفواتير: " +
+                    money(invoicesDue) + " جنيه" +
+                    "\nإجمالي الرصيد: " +
+                    money(balance) + " جنيه"
+                );
+
+                list.addView(item);
+
+                item.setOnClickListener(v ->
+                    new AlertDialog.Builder(this)
+                        .setTitle(name)
+                        .setItems(
+                            new String[]{
+                                "تعديل البيانات",
+                                "تفاصيل الرصيد",
+                                "حذف"
+                            },
+                            (dialog, choice) -> {
+
+                                if (choice == 0) {
+
+                                    editContact(
+                                        id,
+                                        type,
+                                        name,
+                                        phone,
+                                        address,
+                                        money(opening)
+                                    );
+
+                                } else if (choice == 1) {
+
+                                    showBalance(
+                                        name,
+                                        opening,
+                                        invoicesDue
+                                    );
+
+                                } else {
+
+                                    confirmDelete(
+                                        id,
+                                        name
+                                    );
+                                }
                             }
-                        }
-                    ).show()
-            );
+                        )
+                        .show()
+                );
+            }
         }
+    }
 
-        c.close();
+    private void showBalance(
+        String name,
+        double opening,
+        double invoicesDue
+    ) {
+
+        new AlertDialog.Builder(this)
+            .setTitle("رصيد: " + name)
+            .setMessage(
+                "الرصيد الافتتاحي: " +
+                money(opening) + " جنيه\n\n" +
+                "متبقي الفواتير: " +
+                money(invoicesDue) + " جنيه\n\n" +
+                "إجمالي الرصيد: " +
+                money(opening + invoicesDue) +
+                " جنيه\n\n" +
+                "الرصيد الموجب يعني مبلغًا مستحقًا " +
+                "على العميل أو للمورد حسب نوع الحساب.\n\n" +
+                "لا يشمل هذا الحساب أي تحصيلات أو " +
+                "مدفوعات مستقلة خارج الفواتير."
+            )
+            .setPositiveButton("إغلاق", null)
+            .show();
     }
 
     private EditText input(
@@ -188,16 +417,20 @@ public class CustomersActivity extends Activity {
         String hint,
         String value
     ) {
+
         EditText e = new EditText(this);
+
         e.setHint(hint);
         e.setText(value);
         e.setSingleLine(true);
+
         form.addView(e);
+
         return e;
     }
 
     private void editContact(
-        int id,
+        long id,
         String oldType,
         String oldName,
         String oldPhone,
@@ -205,41 +438,64 @@ public class CustomersActivity extends Activity {
         String oldBalance
     ) {
 
+        ScrollView scroll = new ScrollView(this);
+
         LinearLayout form = new LinearLayout(this);
         form.setOrientation(LinearLayout.VERTICAL);
         form.setPadding(28, 10, 28, 10);
 
         Spinner type = new Spinner(this);
 
-        String[] types = {"عميل", "مورد"};
+        String[] types = {
+            "عميل",
+            "مورد"
+        };
 
-        ArrayAdapter<String> adapter = new ArrayAdapter<>(
-            this,
-            android.R.layout.simple_spinner_dropdown_item,
-            types
+        ArrayAdapter<String> adapter =
+            new ArrayAdapter<>(
+                this,
+                android.R.layout.simple_spinner_item,
+                types
+            );
+
+        adapter.setDropDownViewResource(
+            android.R.layout.simple_spinner_dropdown_item
         );
 
         type.setAdapter(adapter);
+
         type.setSelection(
-            oldType.equals("مورد") ? 1 : 0
+            "supplier".equals(oldType) ? 1 : 0
         );
+
         form.addView(type);
 
         EditText name = input(
-            form, "الاسم", oldName
+            form,
+            "الاسم",
+            oldName
         );
 
         EditText phone = input(
-            form, "رقم الهاتف", oldPhone
+            form,
+            "رقم الهاتف",
+            oldPhone
         );
-        phone.setInputType(InputType.TYPE_CLASS_PHONE);
+
+        phone.setInputType(
+            InputType.TYPE_CLASS_PHONE
+        );
 
         EditText address = input(
-            form, "العنوان", oldAddress
+            form,
+            "العنوان",
+            oldAddress
         );
 
         EditText balance = input(
-            form, "الرصيد الافتتاحي", oldBalance
+            form,
+            "الرصيد الافتتاحي",
+            oldBalance
         );
 
         balance.setInputType(
@@ -248,21 +504,33 @@ public class CustomersActivity extends Activity {
             InputType.TYPE_NUMBER_FLAG_SIGNED
         );
 
-        AlertDialog dialog = new AlertDialog.Builder(this)
-            .setTitle(
-                id < 0 ? "إضافة عميل أو مورد" : "تعديل البيانات"
-            )
-            .setView(form)
-            .setNegativeButton("إلغاء", null)
-            .setPositiveButton("حفظ", null)
-            .create();
+        scroll.addView(form);
+
+        AlertDialog dialog =
+            new AlertDialog.Builder(this)
+                .setTitle(
+                    id < 0
+                        ? "إضافة عميل أو مورد"
+                        : "تعديل البيانات"
+                )
+                .setView(scroll)
+                .setNegativeButton(
+                    "إلغاء",
+                    null
+                )
+                .setPositiveButton(
+                    "حفظ",
+                    null
+                )
+                .create();
 
         dialog.setOnShowListener(d ->
             dialog.getButton(
                 AlertDialog.BUTTON_POSITIVE
             ).setOnClickListener(v -> {
 
-                String n = name.getText().toString().trim();
+                String n =
+                    name.getText().toString().trim();
 
                 if (n.isEmpty()) {
                     name.setError("الاسم مطلوب");
@@ -272,8 +540,11 @@ public class CustomersActivity extends Activity {
                 double amount;
 
                 try {
+
                     amount = Double.parseDouble(
-                        balance.getText().toString().trim()
+                        balance.getText()
+                            .toString()
+                            .trim()
                     );
 
                     if (!Double.isFinite(amount)) {
@@ -281,45 +552,96 @@ public class CustomersActivity extends Activity {
                     }
 
                 } catch (NumberFormatException ex) {
-                    balance.setError("أدخل رصيدًا صحيحًا");
+
+                    balance.setError(
+                        "أدخل رصيدًا صحيحًا"
+                    );
+
                     return;
                 }
 
-                ContentValues values = new ContentValues();
+                String selectedType =
+                    type.getSelectedItemPosition() == 1
+                        ? "supplier"
+                        : "customer";
+
+                ContentValues values =
+                    new ContentValues();
+
+                values.put("type", selectedType);
+                values.put("name", n);
 
                 values.put(
-                    "type", type.getSelectedItem().toString()
+                    "phone",
+                    phone.getText()
+                        .toString()
+                        .trim()
                 );
-                values.put("name", n);
+
                 values.put(
-                    "phone", phone.getText().toString().trim()
+                    "address",
+                    address.getText()
+                        .toString()
+                        .trim()
                 );
+
                 values.put(
-                    "address", address.getText().toString().trim()
+                    "opening_balance",
+                    amount
                 );
-                values.put("balance", amount);
+
+                SQLiteDatabase database =
+                    helper.getWritableDatabase();
 
                 try {
+
                     if (id < 0) {
-                        db.getWritableDatabase().insertOrThrow(
-                            "contacts", null, values
+
+                        database.insertOrThrow(
+                            "parties",
+                            null,
+                            values
                         );
+
                     } else {
-                        db.getWritableDatabase().update(
-                            "contacts",
+
+                        if (
+                            !selectedType.equals(oldType) &&
+                            hasInvoices(database, id)
+                        ) {
+
+                            Toast.makeText(
+                                this,
+                                "لا يمكن تغيير نوع حساب " +
+                                "مرتبط بفواتير",
+                                Toast.LENGTH_LONG
+                            ).show();
+
+                            return;
+                        }
+
+                        database.update(
+                            "parties",
                             values,
                             "id=?",
-                            new String[]{String.valueOf(id)}
+                            new String[]{
+                                String.valueOf(id)
+                            }
                         );
                     }
 
                     dialog.dismiss();
-                    loadContacts(search.getText().toString());
+
+                    loadContacts(
+                        search.getText().toString()
+                    );
 
                 } catch (Exception ex) {
+
                     Toast.makeText(
                         this,
-                        "تعذر حفظ البيانات",
+                        "تعذر حفظ البيانات: " +
+                        ex.getMessage(),
                         Toast.LENGTH_LONG
                     ).show();
                 }
@@ -329,22 +651,93 @@ public class CustomersActivity extends Activity {
         dialog.show();
     }
 
-    private void confirmDelete(int id, String name) {
+    private boolean hasInvoices(
+        SQLiteDatabase database,
+        long id
+    ) {
+
+        try (Cursor c = database.rawQuery(
+            "SELECT 1 FROM invoices " +
+            "WHERE party_id=? LIMIT 1",
+            new String[]{
+                String.valueOf(id)
+            }
+        )) {
+
+            return c.moveToFirst();
+        }
+    }
+
+    private void confirmDelete(
+        long id,
+        String name
+    ) {
 
         new AlertDialog.Builder(this)
             .setTitle("تأكيد الحذف")
-            .setMessage("هل تريد حذف " + name + "؟")
-            .setNegativeButton("إلغاء", null)
-            .setPositiveButton("حذف", (d, w) -> {
+            .setMessage(
+                "هل تريد حذف " + name + "؟"
+            )
+            .setNegativeButton(
+                "إلغاء",
+                null
+            )
+            .setPositiveButton(
+                "حذف",
+                (d, w) -> {
 
-                db.getWritableDatabase().delete(
-                    "contacts",
-                    "id=?",
-                    new String[]{String.valueOf(id)}
-                );
+                    SQLiteDatabase database =
+                        helper.getWritableDatabase();
 
-                loadContacts(search.getText().toString());
-            })
+                    try {
+
+                        if (
+                            hasInvoices(database, id)
+                        ) {
+
+                            Toast.makeText(
+                                this,
+                                "لا يمكن حذف حساب " +
+                                "مرتبط بفواتير",
+                                Toast.LENGTH_LONG
+                            ).show();
+
+                            return;
+                        }
+
+                        database.delete(
+                            "parties",
+                            "id=?",
+                            new String[]{
+                                String.valueOf(id)
+                            }
+                        );
+
+                        loadContacts(
+                            search.getText().toString()
+                        );
+
+                    } catch (SQLiteException e) {
+
+                        Toast.makeText(
+                            this,
+                            "تعذر حذف الحساب " +
+                            "لوجود سجلات مرتبطة به",
+                            Toast.LENGTH_LONG
+                        ).show();
+                    }
+                }
+            )
             .show();
+    }
+
+    @Override
+    protected void onDestroy() {
+
+        if (helper != null) {
+            helper.close();
+        }
+
+        super.onDestroy();
     }
 }
