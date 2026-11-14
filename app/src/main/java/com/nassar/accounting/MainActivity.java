@@ -24,8 +24,10 @@ import android.widget.Toast;
 public class MainActivity extends Activity {
 
     private final int purple = Color.rgb(92, 45, 145);
+
     private LinearLayout page;
     private StockDb db;
+    private AccountingDb accountingDb;
     private boolean stockOpen = false;
 
     static class StockDb extends SQLiteOpenHelper {
@@ -58,7 +60,12 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+
         db = new StockDb(this);
+        accountingDb = new AccountingDb(this);
+
+        accountingDb.getWritableDatabase();
+
         showHome();
     }
 
@@ -106,7 +113,6 @@ public class MainActivity extends Activity {
         subtitle.setText("إدارة الحسابات والمخازن");
         subtitle.setTextSize(16);
         subtitle.setGravity(Gravity.CENTER);
-
         page.addView(subtitle);
 
         ScrollView scroll = new ScrollView(this);
@@ -137,9 +143,13 @@ public class MainActivity extends Activity {
             b.setOnClickListener(v -> {
 
                 if (section.equals("الأصناف والمخازن")) {
+
                     showStock();
 
-                } else if (section.equals("العملاء والموردون")) {
+                } else if (
+                    section.equals("العملاء والموردون")
+                ) {
+
                     startActivity(
                         new Intent(
                             MainActivity.this,
@@ -148,9 +158,12 @@ public class MainActivity extends Activity {
                     );
 
                 } else {
+
                     new AlertDialog.Builder(this)
                         .setTitle(section)
-                        .setMessage("القسم ده لسه تحت التطوير.")
+                        .setMessage(
+                            "القسم ده لسه تحت التطوير."
+                        )
                         .setPositiveButton("موافق", null)
                         .show();
                 }
@@ -234,31 +247,7 @@ public class MainActivity extends Activity {
 
                             } else {
 
-                                new AlertDialog.Builder(this)
-                                    .setTitle("تأكيد الحذف")
-                                    .setMessage(
-                                        "حذف الصنف: " + name + "؟"
-                                    )
-                                    .setNegativeButton(
-                                        "إلغاء", null
-                                    )
-                                    .setPositiveButton(
-                                        "حذف",
-                                        (d, w) -> {
-
-                                            db.getWritableDatabase()
-                                                .delete(
-                                                    "products",
-                                                    "id=?",
-                                                    new String[]{
-                                                        String.valueOf(id)
-                                                    }
-                                                );
-
-                                            showStock();
-                                        }
-                                    )
-                                    .show();
+                                confirmDelete(id, name);
                             }
                         }
                     )
@@ -269,7 +258,35 @@ public class MainActivity extends Activity {
         c.close();
 
         scroll.addView(list);
-        page.addView(scroll);
+        page.addView(
+            scroll,
+            new LinearLayout.LayoutParams(
+                -1, 0, 1
+            )
+        );
+    }
+
+    private void confirmDelete(int id, String name) {
+
+        new AlertDialog.Builder(this)
+            .setTitle("حذف الصنف")
+            .setMessage(
+                "هل تريد حذف الصنف: " + name + "؟"
+            )
+            .setNegativeButton("إلغاء", null)
+            .setPositiveButton("حذف", (d, w) -> {
+
+                db.getWritableDatabase().delete(
+                    "products",
+                    "id=?",
+                    new String[]{
+                        String.valueOf(id)
+                    }
+                );
+
+                showStock();
+            })
+            .show();
     }
 
     private EditText field(
@@ -444,5 +461,12 @@ public class MainActivity extends Activity {
         } else {
             super.onBackPressed();
         }
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (db != null) db.close();
+        if (accountingDb != null) accountingDb.close();
+        super.onDestroy();
     }
 }
