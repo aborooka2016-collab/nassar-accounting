@@ -3,6 +3,7 @@ package com.nassar.accounting;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.Intent;
 import android.os.Bundle;
 import android.graphics.Color;
 import android.database.Cursor;
@@ -137,12 +138,19 @@ public class MainActivity extends Activity {
 
                 if (section.equals("الأصناف والمخازن")) {
                     showStock();
+
+                } else if (section.equals("العملاء والموردون")) {
+                    startActivity(
+                        new Intent(
+                            MainActivity.this,
+                            CustomersActivity.class
+                        )
+                    );
+
                 } else {
                     new AlertDialog.Builder(this)
                         .setTitle(section)
-                        .setMessage(
-                            "القسم ده لسه تحت التطوير."
-                        )
+                        .setMessage("القسم ده لسه تحت التطوير.")
                         .setPositiveButton("موافق", null)
                         .show();
                 }
