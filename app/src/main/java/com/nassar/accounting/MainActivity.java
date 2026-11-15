@@ -1,97 +1,121 @@
-package com.nassar.accounting;
+// ألوان واجهة نصار للحسابات
+private int themeColor = 0xFF592B93;
+private final int goldColor = 0xFFDFAD3D;
 
-import android.app.*;
-import android.os.*;
-import android.content.*;
-import android.database.*;
-import android.database.sqlite.*;
-import android.graphics.Color;
-import android.text.InputType;
-import android.view.*;
-import android.widget.*;
-import java.io.File;
-import java.util.*;
+private android.graphics.drawable.GradientDrawable
+makeBackground(int color, int radius) {
+    android.graphics.drawable.GradientDrawable shape =
+        new android.graphics.drawable.GradientDrawable();
+    shape.setColor(color);
+    shape.setCornerRadius(radius);
+    return shape;
+}
 
-public class MainActivity extends Activity {
-    AccountingDb helper;
-    LinearLayout root, body;
-    final int PURPLE=Color.rgb(91,43,147);
-    String current="الرئيسية";
-    String fmt(double n){return String.format(Locale.US,"%.2f",n);}
-    void msg(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
-    SQLiteDatabase db(){return helper.getWritableDatabase();}
-    @Override public void onCreate(Bundle b){super.onCreate(b);helper=new AccountingDb(this);try{migrate();}catch(Exception e){new AlertDialog.Builder(this).setTitle("تنبيه نقل البيانات").setMessage(e.toString()).setPositiveButton("موافق",null).show();}home();}
-    void migrate(){SQLiteDatabase d=db();d.execSQL("CREATE TABLE IF NOT EXISTS migration_status(name TEXT PRIMARY KEY)");migrateTable(d,"nassar_stock.db","old_stock_v1","SELECT name,qty,buy,sell FROM products",true);migrateTable(d,"nassar_contacts.db","old_contacts_v1","SELECT type,name,phone,address,balance FROM contacts",false);}
-    void migrateTable(SQLiteDatabase d,String file,String key,String sql,boolean stock){
-        try(Cursor c=d.rawQuery("SELECT 1 FROM migration_status WHERE name=?",new String[]{key})){if(c.moveToFirst())return;}
-        File f=getDatabasePath(file);if(!f.exists())return;
-        SQLiteDatabase old=SQLiteDatabase.openDatabase(f.getAbsolutePath(),null,SQLiteDatabase.OPEN_READONLY);
-        try{d.beginTransaction();try(Cursor c=old.rawQuery(sql,null)){while(c.moveToNext()){
-            ContentValues v=new ContentValues();
-            if(stock){v.put("name",c.getString(0));v.put("quantity",c.getDouble(1));v.put("buy_price",c.getDouble(2));v.put("sell_price",c.getDouble(3));d.insertOrThrow("products",null,v);}
-            else{v.put("type","مورد".equals(c.getString(0))?"supplier":"customer");v.put("name",c.getString(1));v.put("phone",c.getString(2));v.put("address",c.getString(3));v.put("opening_balance",c.getDouble(4));d.insertOrThrow("parties",null,v);}
-        }}ContentValues mark=new ContentValues();mark.put("name",key);d.insertOrThrow("migration_status",null,mark);d.setTransactionSuccessful();}
-        finally{d.endTransaction();old.close();}
+private void showNassarDashboard() {
+    android.widget.ScrollView scroll =
+        new android.widget.ScrollView(this);
+
+    android.widget.LinearLayout page =
+        new android.widget.LinearLayout(this);
+    page.setOrientation(1);
+    page.setPadding(18, 18, 18, 18);
+    page.setLayoutDirection(
+        android.view.View.LAYOUT_DIRECTION_RTL
+    );
+    page.setBackgroundColor(0xFFF7F3FC);
+
+    scroll.addView(page);
+
+    android.widget.TextView header =
+        new android.widget.TextView(this);
+    header.setText("نصار للحسابات\nNASSAR Accounting");
+    header.setTextSize(25);
+    header.setTextColor(-1);
+    header.setGravity(android.view.Gravity.CENTER);
+    header.setPadding(15, 30, 15, 30);
+    header.setBackground(makeBackground(themeColor, 25));
+    page.addView(header);
+
+    String[] sections = {
+        "🛒 فاتورة بيع",
+        "🛍 فاتورة شراء",
+        "↩ مرتجع بيع",
+        "🔄 مرتجع شراء",
+        "💵 سند قبض",
+        "💸 سند صرف",
+        "👥 العملاء",
+        "🚚 الموردون",
+        "📦 الأصناف",
+        "🏬 المخازن",
+        "💰 الخزينة",
+        "📊 التقارير"
+    };
+
+    for (int i = 0; i < sections.length; i += 2) {
+        android.widget.LinearLayout row =
+            new android.widget.LinearLayout(this);
+        row.setOrientation(0);
+
+        page.addView(row);
+
+        for (int j = i; j < Math.min(i + 2, sections.length); j++) {
+            final int index = j;
+
+            android.widget.Button button =
+                new android.widget.Button(this);
+            button.setText(sections[j]);
+            button.setTextSize(17);
+            button.setAllCaps(false);
+            button.setTextColor(themeColor);
+            button.setBackground(
+                makeBackground(0xFFFFFFFF, 18)
+            );
+
+            android.widget.LinearLayout.LayoutParams params =
+                new android.widget.LinearLayout.LayoutParams(
+                    0, 145, 1
+                );
+            params.setMargins(5, 7, 5, 7);
+            row.addView(button, params);
+
+            button.setOnClickListener(v -> {
+                switch (index) {
+                    case 0: invoice(true); break;
+                    case 1: invoice(false); break;
+                    case 2:
+                    case 3: returns(); break;
+                    case 4:
+                    case 5: debts(); break;
+                    case 6:
+                    case 7: parties(); break;
+                    case 8:
+                    case 9: products(); break;
+                    case 10: cash(); break;
+                    case 11: reports(); break;
+                }
+            });
+        }
     }
-    void screen(String title){current=title;root=new LinearLayout(this);root.setOrientation(1);root.setLayoutDirection(View.LAYOUT_DIRECTION_RTL);root.setPadding(16,18,16,12);root.setBackgroundColor(0xfff7f5fa);TextView head=text("نصار للحسابات  |  "+title,23);head.setTextColor(PURPLE);head.setGravity(Gravity.CENTER);root.addView(head);ScrollView scroll=new ScrollView(this);body=new LinearLayout(this);body.setOrientation(1);scroll.addView(body);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));Button back=button("⌂ الرئيسية",root);back.setOnClickListener(v->home());setContentView(root);}
-    TextView text(String s,int size){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setPadding(10,12,10,12);return t;}
-    Button button(String s,LinearLayout where){Button b=new Button(this);b.setAllCaps(false);b.setText(s);b.setTextSize(16);where.addView(b);return b;}
-    EditText edit(LinearLayout p,String hint,String value,boolean numeric){EditText e=new EditText(this);e.setHint(hint);e.setText(value);e.setSingleLine(true);if(numeric)e.setInputType(InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_FLAG_DECIMAL|InputType.TYPE_NUMBER_FLAG_SIGNED);p.addView(e);return e;}
-    LinearLayout form(){LinearLayout l=new LinearLayout(this);l.setOrientation(1);l.setPadding(20,5,20,5);return l;}
-    double num(EditText e){double x=Double.parseDouble(e.getText().toString().trim());if(!Double.isFinite(x))throw new NumberFormatException();return x;}
-    double scalar(String sql,String... args){try(Cursor c=db().rawQuery(sql,args)){return c.moveToFirst()?c.getDouble(0):0;}}
-    void home(){screen("الرئيسية");body.addView(text("إدارة الحسابات والمخازن بدون إنترنت",16));
-        body.addView(text("رصيد الخزينة: "+fmt(cashBalance())+" ج",20));
-        String[] sections={"الأصناف والمخازن","العملاء والموردون","المبيعات","المشتريات","الديون والتحصيلات","المرتجعات","الخزينة والبنوك","المصروفات","التقارير","الإعدادات"};
-        for(String s:sections)button(s,body).setOnClickListener(v->{switch(s){case "الأصناف والمخازن":products();break;case "العملاء والموردون":parties();break;case "المبيعات":invoice(true);break;case "المشتريات":invoice(false);break;case "الديون والتحصيلات":debts();break;case "المرتجعات":returns();break;case "الخزينة والبنوك":cash();break;case "المصروفات":expenses();break;case "التقارير":reports();break;default:settings();}});
-    }
-    void products(){screen("الأصناف والمخازن");button("+ إضافة صنف",body).setOnClickListener(v->productDialog(-1,"","0","0","0"));
-        try(Cursor c=db().rawQuery("SELECT id,name,quantity,buy_price,sell_price FROM products ORDER BY name",null)){while(c.moveToNext()){
-            long id=c.getLong(0);String name=c.getString(1),q=fmt(c.getDouble(2)),buy=fmt(c.getDouble(3)),sell=fmt(c.getDouble(4));
-            button(name+" | كمية "+q+" | شراء "+buy+" | بيع "+sell,body).setOnClickListener(v->new AlertDialog.Builder(this).setTitle(name).setItems(new String[]{"تعديل","حذف"},(d,w)->{if(w==0)productDialog(id,name,q,buy,sell);else confirmDelete("products",id,()->products());}).show());
-        }}
-    }
-    void productDialog(long id,String n,String q,String buy,String sell){LinearLayout f=form();EditText name=edit(f,"اسم الصنف",n,false),qty=edit(f,"الكمية",q,true),b=edit(f,"سعر الشراء",buy,true),s=edit(f,"سعر البيع",sell,true);
-        AlertDialog a=new AlertDialog.Builder(this).setTitle("بيانات الصنف").setView(f).setNegativeButton("إلغاء",null).setPositiveButton("حفظ",null).create();a.setOnShowListener(z->a.getButton(-1).setOnClickListener(v->{try{if(name.getText().toString().trim().isEmpty())throw new Exception("اسم الصنف مطلوب");double x=num(qty),y=num(b),p=num(s);if(x<0||y<0||p<0)throw new Exception("الأرقام يجب ألا تكون سالبة");ContentValues cv=new ContentValues();cv.put("name",name.getText().toString().trim());cv.put("quantity",x);cv.put("buy_price",y);cv.put("sell_price",p);if(id<0)db().insertOrThrow("products",null,cv);else db().update("products",cv,"id=?",new String[]{""+id});a.dismiss();products();}catch(Exception e){msg(e.getMessage());}}));a.show();}
-    void parties(){screen("العملاء والموردون");button("+ إضافة عميل / مورد",body).setOnClickListener(v->partyDialog(-1,"customer","","","","0"));
-        try(Cursor c=db().rawQuery("SELECT id,type,name,phone,address,opening_balance FROM parties ORDER BY name",null)){while(c.moveToNext()){
-            long id=c.getLong(0);String type=c.getString(1),name=c.getString(2),phone=c.getString(3),address=c.getString(4),opening=fmt(c.getDouble(5));
-            button((type.equals("supplier")?"مورد":"عميل")+" | "+name+" | مستحق "+fmt(balance(id,type))+" ج",body).setOnClickListener(v->new AlertDialog.Builder(this).setTitle(name).setItems(new String[]{"تعديل","حذف"},(d,w)->{if(w==0)partyDialog(id,type,name,phone,address,opening);else confirmDelete("parties",id,()->parties());}).show());
-        }}
-    }
-    void partyDialog(long id,String oldType,String n,String p,String address,String opening){LinearLayout f=form();Spinner kind=new Spinner(this);ArrayAdapter<String> a=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,new String[]{"عميل","مورد"});kind.setAdapter(a);kind.setSelection(oldType.equals("supplier")?1:0);f.addView(kind);EditText name=edit(f,"الاسم",n,false),phone=edit(f,"الهاتف",p==null?"":p,false),addr=edit(f,"العنوان",address==null?"":address,false),bal=edit(f,"الرصيد الافتتاحي",opening,true);
-        AlertDialog dlg=new AlertDialog.Builder(this).setTitle("بيانات الحساب").setView(f).setNegativeButton("إلغاء",null).setPositiveButton("حفظ",null).create();dlg.setOnShowListener(z->dlg.getButton(-1).setOnClickListener(v->{try{String type=kind.getSelectedItemPosition()==1?"supplier":"customer";if(name.getText().toString().trim().isEmpty())throw new Exception("الاسم مطلوب");if(id>=0&&!type.equals(oldType)&&scalar("SELECT COUNT(*) FROM invoices WHERE party_id=?",""+id)>0)throw new Exception("لا يمكن تغيير نوع حساب مرتبط بفواتير");ContentValues cv=new ContentValues();cv.put("type",type);cv.put("name",name.getText().toString().trim());cv.put("phone",phone.getText().toString());cv.put("address",addr.getText().toString());cv.put("opening_balance",num(bal));if(id<0)db().insertOrThrow("parties",null,cv);else db().update("parties",cv,"id=?",new String[]{""+id});dlg.dismiss();parties();}catch(Exception e){msg(e.getMessage());}}));dlg.show();}
-    void confirmDelete(String table,long id,Runnable after){new AlertDialog.Builder(this).setTitle("تأكيد الحذف").setMessage("هل تريد حذف السجل؟ لا يمكن حذف سجل مرتبط بفواتير.").setNegativeButton("إلغاء",null).setPositiveButton("حذف",(d,w)->{try{db().delete(table,"id=?",new String[]{""+id});after.run();}catch(Exception e){msg("الحذف مرفوض لوجود سجلات مرتبطة");}}).show();}
-    ArrayList<Long> partyIds=new ArrayList<>(),productIds=new ArrayList<>();
-    Spinner spinnerFor(LinearLayout f,String sql,ArrayList<Long> ids,String empty){ArrayList<String> names=new ArrayList<>();ids.clear();if(empty!=null){names.add(empty);ids.add(-1L);}try(Cursor c=db().rawQuery(sql,null)){while(c.moveToNext()){ids.add(c.getLong(0));names.add(c.getString(1));}}Spinner s=new Spinner(this);ArrayAdapter<String> adapter=new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,names);s.setAdapter(adapter);f.addView(s);return s;}
-    static class Line{long id;String name;double qty,price;Line(long i,String n,double q,double p){id=i;name=n;qty=q;price=p;}double total(){return qty*price;}}
-    void invoice(boolean sale){screen(sale?"فاتورة مبيعات":"فاتورة مشتريات");ArrayList<Line> lines=new ArrayList<>();body.addView(text("العميل / المورد",16));Spinner party=spinnerFor(body,"SELECT id,name FROM parties WHERE type='"+(sale?"customer":"supplier")+"' ORDER BY name",partyIds,"نقدي / بدون حساب");ArrayList<Long> selectedPartyIds=new ArrayList<>(partyIds);
-        body.addView(text("الصنف",16));Spinner product=spinnerFor(body,"SELECT id,name FROM products ORDER BY name",productIds,null);ArrayList<Long> selectedProductIds=new ArrayList<>(productIds);
-        EditText qty=edit(body,"الكمية","1",true),price=edit(body,"سعر الوحدة","",true),paid=edit(body,"المبلغ المدفوع","0",true),notes=edit(body,"ملاحظات","",false);TextView summary=text("الإجمالي: 0.00 ج",19);body.addView(summary);LinearLayout rows=form();body.addView(rows);
-        product.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(android.widget.AdapterView<?> p){}public void onItemSelected(android.widget.AdapterView<?> p,View v,int pos,long id){if(pos>=0&&pos<selectedProductIds.size())price.setText(fmt(scalar("SELECT "+(sale?"sell_price":"buy_price")+" FROM products WHERE id=?",""+selectedProductIds.get(pos))));}});
-        button("+ إضافة الصنف للفاتورة",body).setOnClickListener(v->{try{int pos=product.getSelectedItemPosition();if(pos<0)throw new Exception("أضف صنفًا أولًا");double q=num(qty),p=num(price);if(q<=0||p<0)throw new Exception("الكمية أو السعر غير صحيح");Line line=new Line(selectedProductIds.get(pos),product.getSelectedItem().toString(),q,p);if(!Double.isFinite(line.total()))throw new Exception("قيمة غير صحيحة");lines.add(line);rows.removeAllViews();double total=0;for(Line l:lines){total+=l.total();Button row=button(l.name+" × "+fmt(l.qty)+" = "+fmt(l.total())+" (حذف)",rows);row.setOnClickListener(w->{lines.remove(l);invoiceMessage(rows,lines,summary);});}summary.setText("الإجمالي: "+fmt(total)+" ج");}catch(Exception e){msg(e.getMessage());}});
-        button("حفظ الفاتورة",body).setOnClickListener(v->{try{if(lines.isEmpty())throw new Exception("الفاتورة فارغة");double total=0;for(Line l:lines)total+=l.total();double pay=num(paid);if(!Double.isFinite(total)||pay<0||pay>total)throw new Exception("المبلغ المدفوع غير صحيح");int pos=party.getSelectedItemPosition();long partyId=pos>=0?selectedPartyIds.get(pos):-1;if(pay<total&&partyId<0)throw new Exception("الفاتورة الآجلة تحتاج حسابًا");saveInvoice(sale,partyId,lines,total,pay,notes.getText().toString());msg("تم حفظ الفاتورة");invoice(sale);}catch(Exception e){msg(e.getMessage());}});
-        button("سجل الفواتير",body).setOnClickListener(v->invoiceHistory());
-    }
-    void invoiceMessage(LinearLayout rows,ArrayList<Line> lines,TextView summary){rows.removeAllViews();double total=0;for(Line l:lines){total+=l.total();button(l.name+" × "+fmt(l.qty)+" (حذف)",rows).setOnClickListener(v->{lines.remove(l);invoiceMessage(rows,lines,summary);});}summary.setText("الإجمالي: "+fmt(total)+" ج");}
-    void saveInvoice(boolean sale,long partyId,ArrayList<Line> lines,double total,double paid,String notes){SQLiteDatabase d=db();d.beginTransaction();try{
-        if(sale){HashMap<Long,Double> required=new HashMap<>();for(Line l:lines)required.put(l.id,required.containsKey(l.id)?required.get(l.id)+l.qty:l.qty);for(Long id:required.keySet())if(scalar("SELECT quantity FROM products WHERE id=?",""+id)+0.000001<required.get(id))throw new IllegalStateException("المخزون غير كافٍ للصنف رقم "+id);}
-        long now=System.currentTimeMillis();ContentValues inv=new ContentValues();inv.put("invoice_type",sale?"sale":"purchase");if(partyId>=0)inv.put("party_id",partyId);inv.put("invoice_date",now);inv.put("total",total);inv.put("discount",0);inv.put("paid",paid);inv.put("notes",notes);long invoiceId=d.insertOrThrow("invoices",null,inv);
-        for(Line l:lines){ContentValues item=new ContentValues();item.put("invoice_id",invoiceId);item.put("product_id",l.id);item.put("quantity",l.qty);item.put("price",l.price);item.put("total",l.total());d.insertOrThrow("invoice_items",null,item);double delta=sale?-l.qty:l.qty;d.execSQL("UPDATE products SET quantity=quantity+? WHERE id=?",new Object[]{delta,l.id});ContentValues move=new ContentValues();move.put("product_id",l.id);move.put("invoice_id",invoiceId);move.put("quantity_change",delta);move.put("movement_date",now);move.put("notes",sale?"بيع":"شراء");d.insertOrThrow("stock_movements",null,move);}
-        if(paid>0){ContentValues cash=new ContentValues();cash.put("movement_type",sale?"receipt":"payment");cash.put("amount",paid);if(partyId>=0)cash.put("party_id",partyId);cash.put("invoice_id",invoiceId);cash.put("movement_date",now);d.insertOrThrow("cash_movements",null,cash);}d.setTransactionSuccessful();
-    }finally{d.endTransaction();}}
-    void invoiceHistory(){StringBuilder s=new StringBuilder();try(Cursor c=db().rawQuery("SELECT id,invoice_type,total,paid FROM invoices ORDER BY id DESC LIMIT 100",null)){while(c.moveToNext())s.append("#").append(c.getLong(0)).append(" ").append(c.getString(1).equals("sale")?"بيع":"شراء").append(" | ").append(fmt(c.getDouble(2))).append(" | متبقي ").append(fmt(c.getDouble(2)-c.getDouble(3))).append("\n");}new AlertDialog.Builder(this).setTitle("آخر 100 فاتورة").setMessage(s.length()==0?"لا توجد فواتير":s.toString()).setPositiveButton("إغلاق",null).show();}
-    double balance(long id,String type){double open=scalar("SELECT opening_balance FROM parties WHERE id=?",""+id);double invoices=scalar("SELECT COALESCE(SUM(total-discount-paid),0) FROM invoices WHERE party_id=?",""+id);double settled=scalar("SELECT COALESCE(SUM(amount),0) FROM cash_movements WHERE party_id=? AND invoice_id IS NULL AND movement_type=?",""+id,type.equals("supplier")?"payment":"receipt");return open+invoices-settled;}
-    void debts(){screen("الديون والتحصيلات");Spinner party=spinnerFor(body,"SELECT id,name FROM parties ORDER BY name",partyIds,null);ArrayList<Long> ids=new ArrayList<>(partyIds);EditText amount=edit(body,"المبلغ","",true),note=edit(body,"بيان الحركة","",false);button("تسجيل تحصيل / سداد",body).setOnClickListener(v->{try{int pos=party.getSelectedItemPosition();if(pos<0)throw new Exception("اختر حسابًا");long id=ids.get(pos);String type=partyType(id);double val=num(amount),due=balance(id,type);if(val<=0||val>due+0.000001)throw new Exception("المبلغ أكبر من الرصيد المستحق أو غير صحيح");ContentValues cv=new ContentValues();cv.put("party_id",id);cv.put("movement_type",type.equals("supplier")?"payment":"receipt");cv.put("amount",val);cv.put("movement_date",System.currentTimeMillis());cv.put("notes",note.getText().toString());db().insertOrThrow("cash_movements",null,cv);msg("تم تسجيل الحركة");debts();}catch(Exception e){msg(e.getMessage());}});
-        try(Cursor c=db().rawQuery("SELECT id,type,name FROM parties ORDER BY name",null)){while(c.moveToNext())body.addView(text(c.getString(2)+" | "+(c.getString(1).equals("supplier")?"مورد":"عميل")+" | "+fmt(balance(c.getLong(0),c.getString(1)))+" ج",16));}
-    }
-    String partyType(long id){try(Cursor c=db().rawQuery("SELECT type FROM parties WHERE id=?",new String[]{""+id})){return c.moveToFirst()?c.getString(0):"customer";}}
-    double cashBalance(){return scalar("SELECT COALESCE(SUM(CASE WHEN movement_type IN ('receipt','capital') THEN amount ELSE -amount END),0) FROM cash_movements");}
-    void cash(){screen("الخزينة والبنوك");body.addView(text("الرصيد الحالي: "+fmt(cashBalance())+" ج",23));EditText amount=edit(body,"مبلغ إيداع رأس المال","",true),note=edit(body,"بيان","",false);button("إضافة رأس مال للخزينة",body).setOnClickListener(v->{try{double n=num(amount);if(n<=0)throw new Exception("أدخل مبلغًا موجبًا");ContentValues cv=new ContentValues();cv.put("movement_type","capital");cv.put("amount",n);cv.put("movement_date",System.currentTimeMillis());cv.put("notes",note.getText().toString());db().insertOrThrow("cash_movements",null,cv);cash();}catch(Exception e){msg(e.getMessage());}});try(Cursor c=db().rawQuery("SELECT movement_type,amount,notes FROM cash_movements ORDER BY id DESC LIMIT 50",null)){while(c.moveToNext())body.addView(text(c.getString(0)+" | "+fmt(c.getDouble(1))+" ج | "+c.getString(2),15));}}
-    void expenses(){screen("المصروفات");EditText category=edit(body,"بند المصروف","",false),amount=edit(body,"القيمة","",true),notes=edit(body,"ملاحظات","",false);button("حفظ المصروف",body).setOnClickListener(v->{try{double n=num(amount);if(n<=0||category.getText().toString().trim().isEmpty())throw new Exception("أدخل البند والمبلغ");SQLiteDatabase d=db();d.beginTransaction();try{long now=System.currentTimeMillis();ContentValues e=new ContentValues();e.put("category",category.getText().toString());e.put("amount",n);e.put("expense_date",now);e.put("notes",notes.getText().toString());d.insertOrThrow("expenses",null,e);ContentValues m=new ContentValues();m.put("movement_type","expense");m.put("amount",n);m.put("movement_date",now);m.put("notes",category.getText().toString());d.insertOrThrow("cash_movements",null,m);d.setTransactionSuccessful();}finally{d.endTransaction();}expenses();}catch(Exception e){msg(e.getMessage());}});try(Cursor c=db().rawQuery("SELECT category,amount FROM expenses ORDER BY id DESC LIMIT 50",null)){while(c.moveToNext())body.addView(text(c.getString(0)+" | "+fmt(c.getDouble(1))+" ج",16));}}
-    void reports(){screen("التقارير");body.addView(text("إجمالي المبيعات: "+fmt(scalar("SELECT COALESCE(SUM(total-discount),0) FROM invoices WHERE invoice_type='sale'"))+" ج",19));body.addView(text("إجمالي المشتريات: "+fmt(scalar("SELECT COALESCE(SUM(total-discount),0) FROM invoices WHERE invoice_type='purchase'"))+" ج",19));body.addView(text("المصروفات: "+fmt(scalar("SELECT COALESCE(SUM(amount),0) FROM expenses"))+" ج",19));body.addView(text("رصيد الخزينة: "+fmt(cashBalance())+" ج",19));body.addView(text("عدد الأصناف: "+(long)scalar("SELECT COUNT(*) FROM products"),19));body.addView(text("عدد العملاء والموردين: "+(long)scalar("SELECT COUNT(*) FROM parties"),19));body.addView(text("ملاحظة: لا يتم احتساب صافي الربح قبل توفير تكلفة البضاعة المباعة والتسويات.",15));button("عرض الفواتير",body).setOnClickListener(v->invoiceHistory());}
-    void returns(){screen("المرتجعات");body.addView(text("المرتجعات قيد التطوير. لا تُسجل مرتجعًا كفاتورة عادية حتى لا تتأثر الأرصدة بشكل خاطئ.",18));}
-    void settings(){screen("الإعدادات");body.addView(text("قاعدة البيانات: nassar_accounting.db",17));body.addView(text("يعمل التطبيق بدون إنترنت. احتفظ بنسخة من بيانات الجهاز قبل أي إعادة تثبيت.",17));body.addView(text("هذه النسخة لا تتضمن بعد نسخًا احتياطيًا قابلًا للاستعادة أو صلاحيات مستخدمين.",16));}
-    @Override public void onBackPressed(){if(current.equals("الرئيسية"))super.onBackPressed();else home();}
-    @Override protected void onDestroy(){if(helper!=null)helper.close();super.onDestroy();}
+
+    android.widget.TextView statistics =
+        new android.widget.TextView(this);
+    statistics.setText("إحصائيات الحسابات");
+    statistics.setTextSize(22);
+    statistics.setTextColor(themeColor);
+    statistics.setPadding(10, 20, 10, 10);
+    page.addView(statistics);
+
+    android.widget.TextView balance =
+        new android.widget.TextView(this);
+    balance.setText(
+        "رصيد الخزينة: " + fmt(cashBalance()) + " ج"
+    );
+    balance.setTextSize(19);
+    balance.setPadding(15, 20, 15, 20);
+    balance.setBackground(
+        makeBackground(0xFFFFFFFF, 15)
+    );
+    page.addView(balance);
+
+    setContentView(scroll);
 }
